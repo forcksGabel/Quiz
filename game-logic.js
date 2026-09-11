@@ -123,9 +123,11 @@ function createGame(options) {
       buzzWinner: null,
       currentTurnPlayerId: null,
       doublePointsEnabled: true,
-      doublePointsThreshold: 5
+      doublePointsThreshold: 5,
+      pins: {} // map-pin questions: playerId -> { x, y, at } (x/y in percent, 0-100)
     };
   }
+  const clampPct = (v) => Math.max(0, Math.min(100, Number(v) || 0));
   let game = defaultGame();
   let players = {}; // id -> { id, name, score, connected }
 
@@ -163,6 +165,7 @@ function createGame(options) {
       categoryName: cat.name,
       points: q.points,
       displayPoints: q.used ? q.points : displayPoints(q.points),
+      type: q.type || 'text',
       question: q.question,
       questionImage: q.questionImage || null,
       hintsAll: (q.hints || []).length,
@@ -170,9 +173,27 @@ function createGame(options) {
       excluded: game.excluded,
       answerRevealed: game.answerRevealed
     };
+    if (q.type === 'map') {
+      out.mapImage = q.mapImage || null;
+      out.pinCount = Object.keys(game.pins).length;
+      out.pinnedPlayerIds = Object.keys(game.pins);
+    }
     if (game.answerRevealed) {
       out.answer = q.answer || '';
       out.answerImage = q.answerImage || null;
+      if (q.type === 'map') {
+        out.targetX = q.targetX;
+        out.targetY = q.targetY;
+        out.pins = Object.entries(game.pins).map(([playerId, p]) => {
+          const dx = p.x - q.targetX, dy = p.y - q.targetY;
+          return {
+            playerId,
+            name: players[playerId] ? players[playerId].name : '?',
+            x: p.x, y: p.y,
+            distance: Math.sqrt(dx * dx + dy * dy)
+          };
+        }).sort((a, b) => a.distance - b.distance);
+      }
     }
     return out;
   }
@@ -198,6 +219,16 @@ function createGame(options) {
     base.categories = [...categories].sort((a, b) => a.order - b.order).map(c => ({
       ...c, questions: [...c.questions].sort((a, b) => a.order - b.order)
     }));
+    if (game.phase === 'question') {
+      const q = findQuestion(game.openCatId, game.openQId);
+      if (q && q.type === 'map') {
+        base.livePins = Object.entries(game.pins).map(([playerId, p]) => ({
+          playerId,
+          name: players[playerId] ? players[playerId].name : '?',
+          x: p.x, y: p.y, at: p.at
+        })).sort((a, b) => a.at - b.at);
+      }
+    }
     return base;
   }
 
@@ -223,6 +254,15 @@ function createGame(options) {
     if (game.buzzWinner) return false;
     if (game.excluded.includes(playerId)) return false;
     game.buzzWinner = { playerId, name: players[playerId].name, at: Date.now() };
+    return true;
+  }
+  function placePin(playerId, x, y) {
+    if (!playerId || !players[playerId]) return false;
+    if (game.phase !== 'question') return false;
+    if (game.answerRevealed) return false;
+    const q = findQuestion(game.openCatId, game.openQId);
+    if (!q || q.type !== 'map') return false;
+    game.pins = { ...game.pins, [playerId]: { x: clampPct(x), y: clampPct(y), at: Date.now() } };
     return true;
   }
 
@@ -338,10 +378,13 @@ function createGame(options) {
       return { src: img.src, alt: String(img.alt || '').slice(0, 200) };
     };
 
+    const type = payload.type === 'map' ? 'map' : 'text';
+
     if (payload.qId) {
       const q = findQuestion(payload.catId, payload.qId);
       if (!q) return { ok: false, error: 'Frage nicht gefunden.' };
       q.points = points; q.question = question; q.answer = answer; q.hints = hints;
+      if (payload.type !== undefined) q.type = type;
       if (payload.questionImage !== undefined) {
         const img = clip(payload.questionImage);
         if (img && img.__tooBig) return { ok: false, error: 'Frage-Bild ist zu groß.' };
@@ -352,15 +395,25 @@ function createGame(options) {
         if (img && img.__tooBig) return { ok: false, error: 'Antwort-Bild ist zu groß.' };
         q.answerImage = img;
       }
+      if (payload.mapImage !== undefined) {
+        const img = clip(payload.mapImage);
+        if (img && img.__tooBig) return { ok: false, error: 'Karten-Bild ist zu groß.' };
+        q.mapImage = img;
+      }
+      if (payload.targetX !== undefined) q.targetX = clampPct(payload.targetX);
+      if (payload.targetY !== undefined) q.targetY = clampPct(payload.targetY);
       if (q.questionImage || q.answerImage) delete q.curatorNote;
     } else {
       const order = cat.questions.reduce((m, q) => Math.max(m, q.order), -1) + 1;
       const qImg = clip(payload.questionImage);
       const aImg = clip(payload.answerImage);
-      if ((qImg && qImg.__tooBig) || (aImg && aImg.__tooBig)) return { ok: false, error: 'Bild ist zu groß.' };
+      const mapImg = clip(payload.mapImage);
+      if ((qImg && qImg.__tooBig) || (aImg && aImg.__tooBig) || (mapImg && mapImg.__tooBig)) return { ok: false, error: 'Bild ist zu groß.' };
       cat.questions.push({
         id: uid(), points, order, question, answer, hints, used: false,
-        questionImage: qImg, answerImage: aImg
+        questionImage: qImg, answerImage: aImg,
+        type, mapImage: mapImg,
+        targetX: clampPct(payload.targetX), targetY: clampPct(payload.targetY)
       });
     }
     saveCategoriesDebounced();
@@ -384,7 +437,7 @@ function createGame(options) {
 
   return {
     buildPublicPayload, buildGmPayload,
-    identifyPlayer, markDisconnected, removePlayer, buzz,
+    identifyPlayer, markDisconnected, removePlayer, buzz, placePin,
     openQuestion, revealHint, revealAnswer, markWrong, closeQuestion,
     setTurn, adjustScore, toggleDoublePoints, resetQuestions, resetScores, newGame,
     addCategory, renameCategory, deleteCategory, moveCategory, saveQuestion, deleteQuestion,
