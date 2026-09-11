@@ -556,7 +556,7 @@ function leaveGame(){
 function gmOpenQuestion(catId, qId){ S.socket.emit('gm:openQuestion', {catId, qId}); }
 function gmRevealHint(){ S.socket.emit('gm:revealHint'); }
 function gmRevealAnswer(){ S.socket.emit('gm:revealAnswer'); }
-function gmMarkWrong(){ S.socket.emit('gm:markWrong'); }
+function gmMarkWrong(penaltyPoints){ S.socket.emit('gm:markWrong', {penaltyPoints}); }
 function gmCloseToBoard(markUsed, awardWinnerId, points){ S.socket.emit('gm:closeQuestion', {markUsed, awardWinnerId, points}); }
 function gmSetTurn(playerId){ S.socket.emit('gm:setTurn', {playerId}); }
 function gmAdjustScore(playerId, delta){ S.socket.emit('gm:adjustScore', {playerId, delta}); }
@@ -943,8 +943,10 @@ function renderGMStageControls(open, winner){
 
   out += '<div class="stage-actions-row" style="margin-top:10px;"><div class="stage-actions">';
   if(winner){
+    const halfPoints = Math.round(open.displayPoints / 2);
     out += h`<button class="btn cyan" onclick="gmCloseToBoard(true,'${winner.playerId}', ${open.displayPoints})">✓ Richtig – ${esc(winner.name)} bekommt ${open.displayPoints} Punkte</button>`;
-    out += `<button class="btn danger" onclick="gmMarkWrong()">✗ Falsch – Buzzer neu freigeben</button>`;
+    out += `<button class="btn ghost" onclick="gmMarkWrong()">✗ Falsch – Buzzer neu freigeben</button>`;
+    out += h`<button class="btn danger" onclick="gmMarkWrong(${halfPoints})">✗ Falsch (−${halfPoints}) – ${esc(winner.name)} verliert ${halfPoints} Punkte</button>`;
   } else {
     out += '<span class="buzz-status">Warte auf einen Buzzer …</span>';
   }
