@@ -226,6 +226,22 @@
   .stage-image img{ max-width:100%; max-height:360px; border-radius:12px; border:1px solid var(--edge-soft); display:block; }
   .stage-image figcaption{ color:var(--muted); font-size:0.85rem; }
 
+  .map-stage-figure{ position:relative; margin:0 0 10px; display:block; border-radius:12px; overflow:hidden; border:1px solid var(--edge-soft); line-height:0; user-select:none; -webkit-user-select:none; }
+  .map-stage-figure img{ max-width:100%; max-height:min(70vh,520px); width:100%; object-fit:contain; display:block; background:#04070d; pointer-events:none; }
+  .map-stage-figure.clickable{ cursor:crosshair; }
+  .map-stage-figure.clickable:hover{ outline:2px solid var(--cyan); outline-offset:-2px; }
+  .map-marker{ position:absolute; transform:translate(-50%,-100%); display:flex; flex-direction:column; align-items:center; pointer-events:none; z-index:2; }
+  .map-marker-dot{ width:16px; height:16px; border-radius:50% 50% 50% 0; transform:rotate(-45deg); border:2px solid #0b0704; box-shadow:0 2px 6px rgba(0,0,0,0.6); }
+  .map-marker-label{ margin-top:3px; font-size:0.68rem; font-weight:700; color:var(--gold-bright); background:rgba(4,7,13,0.82); padding:1px 6px; border-radius:999px; white-space:nowrap; letter-spacing:0.02em; }
+  .map-marker.map-pin-mine .map-marker-dot{ background:var(--cyan-bright); }
+  .map-marker.map-pin-mine .map-marker-label{ color:var(--cyan-bright); }
+  .map-marker.map-pin-live .map-marker-dot{ background:var(--gold-bright); }
+  .map-marker.map-target .map-marker-dot{ background:var(--success, #4fd67a); border-radius:50%; transform:none; width:14px; height:14px; box-shadow:0 0 0 4px rgba(79,214,122,0.25); }
+  .map-marker.map-pin-final .map-marker-dot{ background:var(--gold); }
+  .map-marker.map-pin-final.mine .map-marker-dot{ background:var(--cyan-bright); }
+  .map-hint{ color:var(--muted); font-size:0.85rem; margin:0 0 18px; }
+  .map-missing{ color:var(--muted); font-size:0.9rem; margin:0 0 18px; font-style:italic; }
+
   .hint-box{ margin: 0 0 18px; padding:16px 18px; border-radius:12px; background: rgba(200,170,110,0.08); border:1px solid var(--edge-soft); }
   .hint-box-title{ font-size:0.78rem; text-transform:uppercase; letter-spacing:0.1em; color:var(--gold); margin-bottom:10px; }
   .hint-list{ margin:0; padding-left:20px; display:grid; gap:8px; font-size:1.08rem; line-height:1.45; }
@@ -433,7 +449,8 @@ const S = {
   playerName: lsGet('lolq_playerName', null),
   state: null,            // last payload from server 'state' event
   editorOpen: null,
-  pendingRole: null
+  pendingRole: null,
+  myMapPin: null           // local optimistic pin { x, y } for the currently open map question
 };
 
 function defaultState(){
@@ -456,6 +473,9 @@ function boot(){
     render();
   });
   socket.on('state', (payload)=>{
+    const prevOpenKey = (S.state && S.state.open) ? (S.state.open.catId + ':' + S.state.open.qId) : null;
+    const nextOpenKey = payload.open ? (payload.open.catId + ':' + payload.open.qId) : null;
+    if(nextOpenKey !== prevOpenKey) S.myMapPin = null;
     S.state = payload;
     S.isGM = !!payload.isGM;
     if(S.view==='loading' || S.view==='gmPin'){ S.view = S.isGM ? 'gm' : 'player'; }
@@ -564,7 +584,9 @@ function openQuestionEditor(catId, qId){
   S.editorOpen = qId ? { catId, qId } : { catId, isNew:true };
   const cat = (S.state.categories||[]).find(c=>c.id===catId);
   const q = (cat && qId) ? cat.questions.find(x=>x.id===qId) : null;
-  window.__qImgState = { question: q ? (q.questionImage||null) : null, answer: q ? (q.answerImage||null) : null };
+  window.__qImgState = { question: q ? (q.questionImage||null) : null, answer: q ? (q.answerImage||null) : null, map: q ? (q.mapImage||null) : null };
+  window.__qType = (q && q.type === 'map') ? 'map' : 'text';
+  window.__mapTarget = { x: (q && q.targetX !== undefined) ? q.targetX : 50, y: (q && q.targetY !== undefined) ? q.targetY : 50 };
   renderModalRoot();
 }
 function closeQuestionEditor(){ S.editorOpen = null; renderModalRoot(); }
@@ -572,6 +594,7 @@ function renderModalRoot(){
   const root = document.getElementById('modal-root');
   if(!root) return;
   root.innerHTML = S.editorOpen ? renderModal() : '';
+  if(S.editorOpen) renderMapTargetPreview();
 }
 
 function saveQuestionFromForm(catId, qId){
@@ -583,11 +606,17 @@ function saveQuestionFromForm(catId, qId){
   if(!question){ toast('Bitte eine Frage eingeben.', 'err'); return; }
 
   const qImgState = window.__qImgState || {};
+  const type = window.__qType === 'map' ? 'map' : 'text';
+  const target = window.__mapTarget || { x: 50, y: 50 };
   const payload = {
     catId, qId: qId || undefined,
     points, question, answer, hints,
+    type,
     questionImage: qImgState.question !== undefined ? qImgState.question : null,
-    answerImage: qImgState.answer !== undefined ? qImgState.answer : null
+    answerImage: qImgState.answer !== undefined ? qImgState.answer : null,
+    mapImage: qImgState.map !== undefined ? qImgState.map : null,
+    targetX: target.x,
+    targetY: target.y
   };
   S.socket.emit('gm:saveQuestion', payload);
   closeQuestionEditor();
@@ -610,6 +639,7 @@ async function handleImageUpload(slot, file){
     window.__qImgState = window.__qImgState || {};
     window.__qImgState[slot] = { src: dataUri, alt: '' };
     renderImageSlotPreview(slot);
+    if(slot === 'map') renderMapTargetPreview();
     box.querySelector('.img-slot-status').textContent = '';
   }catch(e){
     box.querySelector('.img-slot-status').textContent = 'Fehler: ' + e.message;
@@ -619,11 +649,55 @@ function setImageUrl(slot, url){
   window.__qImgState = window.__qImgState || {};
   window.__qImgState[slot] = url ? { src: url, alt: '' } : null;
   renderImageSlotPreview(slot);
+  if(slot === 'map') renderMapTargetPreview();
 }
 function clearImage(slot){
   window.__qImgState = window.__qImgState || {};
   window.__qImgState[slot] = null;
   renderImageSlotPreview(slot);
+  if(slot === 'map') renderMapTargetPreview();
+}
+
+function onQuestionTypeChange(val){
+  window.__qType = (val === 'map') ? 'map' : 'text';
+  const block = document.getElementById('qf-map-block');
+  if(block) block.style.display = (window.__qType === 'map') ? 'block' : 'none';
+  if(window.__qType === 'map') renderMapTargetPreview();
+}
+function renderMapTargetPreview(){
+  const figure = document.getElementById('qf-map-target-figure');
+  if(!figure) return;
+  const mapVal = (window.__qImgState||{}).map;
+  const t = window.__mapTarget || { x:50, y:50 };
+  if(mapVal && mapVal.src){
+    figure.innerHTML = '<img src="' + esc(mapVal.src) + '" alt="" draggable="false">' + mapMarkerHtml(t.x, t.y, 'map-target', '🎯 Ziel');
+  } else {
+    figure.innerHTML = '<div class="map-missing" style="padding:30px 10px; text-align:center;">Bitte zuerst ein Karten-Bild hochladen.</div>';
+  }
+}
+function handleMapTargetClick(event){
+  const figure = document.getElementById('qf-map-target-figure');
+  if(!figure) return;
+  const mapVal = (window.__qImgState||{}).map;
+  if(!mapVal || !mapVal.src) return;
+  const rect = figure.getBoundingClientRect();
+  if(!rect.width || !rect.height) return;
+  let x = ((event.clientX - rect.left) / rect.width) * 100;
+  let y = ((event.clientY - rect.top) / rect.height) * 100;
+  x = Math.round(Math.max(0, Math.min(100, x)) * 10) / 10;
+  y = Math.round(Math.max(0, Math.min(100, y)) * 10) / 10;
+  window.__mapTarget = { x, y };
+  const xi = document.getElementById('qf-target-x'); if(xi) xi.value = x;
+  const yi = document.getElementById('qf-target-y'); if(yi) yi.value = y;
+  renderMapTargetPreview();
+}
+function onTargetInputChange(){
+  const xi = document.getElementById('qf-target-x');
+  const yi = document.getElementById('qf-target-y');
+  const x = Math.max(0, Math.min(100, parseFloat(xi && xi.value) || 0));
+  const y = Math.max(0, Math.min(100, parseFloat(yi && yi.value) || 0));
+  window.__mapTarget = { x, y };
+  renderMapTargetPreview();
 }
 function renderImageSlotPreview(slot){
   const box = document.getElementById('qf-img-' + slot);
@@ -672,6 +746,21 @@ function pressBuzzer(){
   const btn = document.getElementById('buzz-btn');
   if(btn) btn.disabled = true;
   S.socket.emit('player:buzz');
+}
+
+function handleMapClick(event){
+  const figure = document.getElementById('map-pin-figure');
+  if(!figure) return;
+  const rect = figure.getBoundingClientRect();
+  if(!rect.width || !rect.height) return;
+  const pt = (event.changedTouches && event.changedTouches[0]) || event;
+  let x = ((pt.clientX - rect.left) / rect.width) * 100;
+  let y = ((pt.clientY - rect.top) / rect.height) * 100;
+  x = Math.max(0, Math.min(100, x));
+  y = Math.max(0, Math.min(100, y));
+  S.myMapPin = { x, y };
+  S.socket.emit('player:placePin', { x, y });
+  render();
 }
 
 /* ============================== render: shared bits ============================== */
@@ -755,6 +844,10 @@ function renderStage(isGMView){
     out += h`<figure class="stage-image"><img src="${esc(open.questionImage.src)}" alt="${esc(open.questionImage.alt||'')}"></figure>`;
   }
 
+  if(open.type === 'map'){
+    out += renderMapStage(open, isGMView);
+  }
+
   if(open.hintsShown && open.hintsShown.length){
     out += '<div class="hint-box"><div class="hint-box-title">Tipps</div><ol class="hint-list">';
     open.hintsShown.forEach(hint=> out += '<li>' + esc(hint) + '</li>');
@@ -788,6 +881,53 @@ function renderStage(isGMView){
   }
 
   out += '</div></div>';
+  return out;
+}
+
+function mapMarkerHtml(x, y, cls, label){
+  return h`<div class="map-marker ${cls}" style="left:${x}%;top:${y}%" title="${esc(label)}"><span class="map-marker-dot"></span><span class="map-marker-label">${esc(label)}</span></div>`;
+}
+
+function renderMapStage(open, isGMView){
+  const mapImg = open.mapImage;
+  if(!mapImg || !mapImg.src){
+    return '<div class="map-missing">Keine Karte für diese Frage hinterlegt.</div>';
+  }
+  let markers = '';
+
+  if(isGMView){
+    const full = findFullQuestion(open.catId, open.qId);
+    if(full && full.targetX !== undefined && full.targetY !== undefined){
+      markers += mapMarkerHtml(full.targetX, full.targetY, 'map-target', '🎯 Ziel');
+    }
+    (S.state.livePins || []).forEach(p=>{
+      markers += mapMarkerHtml(p.x, p.y, 'map-pin-live', p.name);
+    });
+  } else if(open.answerRevealed){
+    if(open.targetX !== undefined && open.targetY !== undefined){
+      markers += mapMarkerHtml(open.targetX, open.targetY, 'map-target', '🎯 Ziel');
+    }
+    (open.pins || []).forEach(p=>{
+      const mine = p.playerId === S.playerId;
+      const label = p.name + ' (' + p.distance.toFixed(1) + ')';
+      markers += mapMarkerHtml(p.x, p.y, 'map-pin-final' + (mine ? ' mine' : ''), label);
+    });
+  } else if(S.myMapPin){
+    markers += mapMarkerHtml(S.myMapPin.x, S.myMapPin.y, 'map-pin-mine', 'Dein Pin');
+  }
+
+  const clickable = !isGMView && !open.answerRevealed;
+  let out = h`<figure class="stage-image map-stage-figure ${clickable ? 'clickable' : ''}" id="map-pin-figure" ${clickable ? 'onclick="handleMapClick(event)"' : ''}>`;
+  out += h`<img src="${esc(mapImg.src)}" alt="${esc(mapImg.alt || '')}" draggable="false">`;
+  out += markers;
+  out += '</figure>';
+
+  if(isGMView){
+    const n = (S.state.livePins || []).length;
+    out += h`<div class="map-hint">👁️ Nur für dich: ${n} Spieler haben bereits gepinnt (live).</div>`;
+  } else if(!open.answerRevealed){
+    out += h`<div class="map-hint">${open.pinCount || 0} Spieler haben bereits gepinnt. Tippe/klicke auf die Karte, um deinen Pin zu setzen.</div>`;
+  }
   return out;
 }
 
@@ -987,6 +1127,7 @@ function renderEditorTab(){
           <div class="q-pts">${q.points} Punkte</div>
           <div class="q-text">${esc(q.question)}</div>
           <div class="q-flags">
+            ${q.type==='map'?'<span class="flag">🗺️ Karten-Pin</span>':''}
             ${q.questionImage?'<span class="flag">📷 Frage-Bild</span>':''}
             ${q.answerImage?'<span class="flag">📷 Antwort-Bild</span>':''}
             ${(q.hints&&q.hints.length)?('<span class="flag">'+q.hints.length+' Tipps</span>'):''}
@@ -1016,10 +1157,19 @@ function renderModal(){
 
   if(q && q.curatorNote){ out += '<div class="curator-note">ℹ️ ' + esc(q.curatorNote) + '</div>'; }
 
+  const qType = (q && q.type === 'map') ? 'map' : 'text';
+  const mapTargetX = (q && q.targetX !== undefined) ? q.targetX : 50;
+  const mapTargetY = (q && q.targetY !== undefined) ? q.targetY : 50;
+
   out += h`
     <div class="field-row" style="grid-template-columns: 140px 1fr;">
       <div class="field"><label>Punkte</label><input type="number" id="qf-points" step="50" min="0" value="${q?q.points:100}"></div>
-      <div></div>
+      <div class="field"><label>Fragetyp</label>
+        <select id="qf-type" onchange="onQuestionTypeChange(this.value)">
+          <option value="text" ${qType!=='map'?'selected':''}>Standard (Text / Bild)</option>
+          <option value="map" ${qType==='map'?'selected':''}>Karten-Pin (interaktive Region)</option>
+        </select>
+      </div>
     </div>
     <div class="field"><label>Frage</label><textarea id="qf-question">${esc(q?q.question:'')}</textarea></div>
     <div class="field"><label>Antwort</label><textarea id="qf-answer">${esc(q?q.answer:'')}</textarea></div>`;
@@ -1032,6 +1182,19 @@ function renderModal(){
 
   out += renderImageSlot('question', 'Bild zur Frage (z.B. „Was ist hier falsch?“)');
   out += renderImageSlot('answer', 'Bild zur Antwort (optional, z.B. Lösungsbild)');
+
+  out += `<div class="field map-editor-block" id="qf-map-block" style="display:${qType==='map'?'block':'none'};">`;
+  out += '<div style="border-top:1px dashed var(--edge-soft); margin:4px 0 16px;"></div>';
+  out += renderImageSlot('map', 'Karten-Bild (z. B. Runeterra-Übersichtskarte)');
+  out += '<label style="display:block; margin-bottom:4px;">Zielort auf der Karte</label>';
+  out += '<p style="color:var(--text-dim); font-size:0.85rem; margin:2px 0 10px;">Klicke auf die Karte, um den gesuchten Ort zu markieren.</p>';
+  out += '<figure class="stage-image map-stage-figure clickable" id="qf-map-target-figure" onclick="handleMapTargetClick(event)"></figure>';
+  out += h`
+    <div class="field-row" style="grid-template-columns:1fr 1fr;">
+      <div class="field"><label>Ziel X (%)</label><input type="number" id="qf-target-x" min="0" max="100" step="0.1" value="${mapTargetX}" oninput="onTargetInputChange()"></div>
+      <div class="field"><label>Ziel Y (%)</label><input type="number" id="qf-target-y" min="0" max="100" step="0.1" value="${mapTargetY}" oninput="onTargetInputChange()"></div>
+    </div>`;
+  out += '</div>';
 
   out += '</div>';
   out += '<div class="modal-foot">';
@@ -1109,6 +1272,10 @@ window.exportBank = exportBank;
 window.importBank = importBank;
 window.pressBuzzer = pressBuzzer;
 window.setGmTab = setGmTab;
+window.handleMapClick = handleMapClick;
+window.onQuestionTypeChange = onQuestionTypeChange;
+window.handleMapTargetClick = handleMapTargetClick;
+window.onTargetInputChange = onTargetInputChange;
 
 boot();
 render();
