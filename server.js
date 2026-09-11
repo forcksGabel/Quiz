@@ -96,6 +96,10 @@ io.on('connection', (socket) => {
     if (Game.buzz(socket.data.playerId)) broadcastState();
   });
 
+  socket.on('player:placePin', ({ x, y } = {}) => {
+    if (Game.placePin(socket.data.playerId, x, y)) broadcastState();
+  });
+
   socket.on('gm:openQuestion', ({ catId, qId } = {}) => {
     if (!requireGM()) return;
     if (Game.openQuestion(catId, qId)) broadcastState();
