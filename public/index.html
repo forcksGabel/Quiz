@@ -226,8 +226,9 @@
   .stage-image img{ max-width:100%; max-height:360px; border-radius:12px; border:1px solid var(--edge-soft); display:block; }
   .stage-image figcaption{ color:var(--muted); font-size:0.85rem; }
 
-  .map-stage-figure{ position:relative; margin:0 0 10px; display:block; border-radius:12px; overflow:hidden; border:1px solid var(--edge-soft); line-height:0; user-select:none; -webkit-user-select:none; }
-  .map-stage-figure img{ max-width:100%; max-height:min(70vh,520px); width:100%; object-fit:contain; display:block; background:#04070d; pointer-events:none; }
+  .map-stage-wrap{ display:flex; justify-content:center; margin:0 0 18px; }
+  .map-stage-figure{ position:relative; display:inline-block; max-width:100%; line-height:0; border-radius:12px; overflow:hidden; border:1px solid var(--edge-soft); user-select:none; -webkit-user-select:none; }
+  .map-stage-figure img{ display:block; max-width:100%; max-height:min(70vh,520px); width:auto; height:auto; background:#04070d; pointer-events:none; }
   .map-stage-figure.clickable{ cursor:crosshair; }
   .map-stage-figure.clickable:hover{ outline:2px solid var(--cyan); outline-offset:-2px; }
   .map-marker{ position:absolute; transform:translate(-50%,-100%); display:flex; flex-direction:column; align-items:center; pointer-events:none; z-index:2; }
@@ -917,10 +918,11 @@ function renderMapStage(open, isGMView){
   }
 
   const clickable = !isGMView && !open.answerRevealed;
-  let out = h`<figure class="stage-image map-stage-figure ${clickable ? 'clickable' : ''}" id="map-pin-figure" ${clickable ? 'onclick="handleMapClick(event)"' : ''}>`;
+  let out = '<div class="map-stage-wrap">';
+  out += h`<figure class="map-stage-figure ${clickable ? 'clickable' : ''}" id="map-pin-figure" ${clickable ? 'onclick="handleMapClick(event)"' : ''}>`;
   out += h`<img src="${esc(mapImg.src)}" alt="${esc(mapImg.alt || '')}" draggable="false">`;
   out += markers;
-  out += '</figure>';
+  out += '</figure></div>';
 
   if(isGMView){
     const n = (S.state.livePins || []).length;
@@ -1188,7 +1190,7 @@ function renderModal(){
   out += renderImageSlot('map', 'Karten-Bild (z. B. Runeterra-Übersichtskarte)');
   out += '<label style="display:block; margin-bottom:4px;">Zielort auf der Karte</label>';
   out += '<p style="color:var(--text-dim); font-size:0.85rem; margin:2px 0 10px;">Klicke auf die Karte, um den gesuchten Ort zu markieren.</p>';
-  out += '<figure class="stage-image map-stage-figure clickable" id="qf-map-target-figure" onclick="handleMapTargetClick(event)"></figure>';
+  out += '<div class="map-stage-wrap"><figure class="map-stage-figure clickable" id="qf-map-target-figure" onclick="handleMapTargetClick(event)"></figure></div>';
   out += h`
     <div class="field-row" style="grid-template-columns:1fr 1fr;">
       <div class="field"><label>Ziel X (%)</label><input type="number" id="qf-target-x" min="0" max="100" step="0.1" value="${mapTargetX}" oninput="onTargetInputChange()"></div>
