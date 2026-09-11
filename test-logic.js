@@ -82,6 +82,29 @@ check(gmPayload.phase === 'board', 'back to board after unscored close');
 const q2Tile = gmPayload.board.find(c => c.id === 'cat-unnuetzes').questions.find(q => q.id === 'q2');
 check(q2Tile.used === false, 'q2 NOT marked used since markUsed=false was passed');
 
+// --- wrong-answer flow with point penalty ---
+check(Game.openQuestion('cat-unnuetzes', 'q3'), 'GM opens q3');
+check(Game.buzz(p1.playerId), 'Alice buzzes on q3');
+payload = Game.buildPublicPayload();
+const q3Points = payload.open.displayPoints;
+const aliceBefore = Game.buildPublicPayload().players.find(p => p.id === p1.playerId).score;
+const halfPoints = Math.round(q3Points / 2);
+check(Game.markWrong(halfPoints), 'GM marks Alice wrong with point penalty');
+payload = Game.buildPublicPayload();
+const aliceAfterPenalty = payload.players.find(p => p.id === p1.playerId).score;
+check(aliceAfterPenalty === aliceBefore - halfPoints, 'Alice lost half the question value after penalized wrong answer');
+gmPayload = Game.buildGmPayload();
+check(gmPayload.buzzWinner === null, 'buzzWinner cleared after penalized wrong answer');
+check(gmPayload.open.excluded.includes(p1.playerId), 'Alice excluded from q3 after penalized wrong answer');
+check(Game.buzz(p2.playerId), 'Bob can still buzz on q3 after Alice was penalized+excluded');
+check(Game.markWrong(), 'GM marks Bob wrong WITHOUT a penalty (no points arg)');
+payload = Game.buildPublicPayload();
+const bobScore = payload.players.find(p => p.id === p2.playerId).score;
+check(bobScore === 0, 'Bob score unaffected when markWrong called without a penalty amount');
+check(Game.closeQuestion(false, null, 0), 'GM closes q3 without further scoring');
+Game.adjustScore(p1.playerId, halfPoints); // restore Alice's score so later absolute-score checks stay accurate
+check(Game.buildPublicPayload().players.find(p => p.id === p1.playerId).score === aliceBefore, "Alice's score restored after penalty test cleanup");
+
 // --- hints reveal progressively ---
 check(Game.openQuestion('cat-esports', 'q4'), 'GM opens esports q4 (has hints)');
 check(Game.revealHint(), 'reveal hint 1');

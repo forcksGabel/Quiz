@@ -106,7 +106,7 @@ io.on('connection', (socket) => {
   });
   socket.on('gm:revealHint', () => { if (!requireGM()) return; if (Game.revealHint()) broadcastState(); });
   socket.on('gm:revealAnswer', () => { if (!requireGM()) return; if (Game.revealAnswer()) broadcastState(); });
-  socket.on('gm:markWrong', () => { if (!requireGM()) return; if (Game.markWrong()) broadcastState(); });
+  socket.on('gm:markWrong', ({ penaltyPoints } = {}) => { if (!requireGM()) return; if (Game.markWrong(penaltyPoints)) broadcastState(); });
   socket.on('gm:closeQuestion', ({ markUsed, awardWinnerId, points } = {}) => {
     if (!requireGM()) return;
     if (Game.closeQuestion(markUsed, awardWinnerId, points)) broadcastState();

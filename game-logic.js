@@ -289,8 +289,12 @@ function createGame(options) {
     game.answerRevealed = true;
     return true;
   }
-  function markWrong() {
+  function markWrong(penaltyPoints) {
     if (game.phase !== 'question' || !game.buzzWinner) return false;
+    const penalty = Number(penaltyPoints) || 0;
+    if (penalty && players[game.buzzWinner.playerId]) {
+      players[game.buzzWinner.playerId].score -= penalty;
+    }
     game.excluded = [...game.excluded, game.buzzWinner.playerId];
     game.buzzWinner = null;
     return true;
